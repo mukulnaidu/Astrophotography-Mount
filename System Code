@@ -1,0 +1,820 @@
+#include <AccelStepper.h>
+#include <LiquidCrystal.h> 
+int startTime = millis();
+
+//CameraPin and variables
+#define CAMERA_PIN 4
+int numberOfLightShots;
+int lightExposureSeconds;
+
+//LCD Setup
+int contrast = 115;
+LiquidCrystal lcd(17, 18, 3, 2, 1, 0); // RS, E, D4, D5, D6, D7
+
+
+//Limit Switches
+#define LIMIT_SWITCH_PIN1 15
+#define LIMIT_SWITCH_PIN2 16
+
+// Globals to track jogging state
+bool isJogging = false;
+unsigned long lastJogUpdate = 0;
+int jogDirectionRA = 0;
+int jogDirectionDec = 0;
+
+//Stepper Motor 1 Variables
+#define STEP_PIN1 11      // Step pin
+#define DIR_PIN1 10       // Direction pin
+// Microstepping control pins
+#define MS1_PIN1 13
+#define MS2_PIN1 12
+
+//Stepper Motor 1 Variables
+#define STEP_PIN2 7      // Step pin
+#define DIR_PIN2 6       // Direction pin
+// Microstepping control pins
+#define MS1_PIN2 9
+#define MS2_PIN2 8
+
+//Stepper Motor Variables
+int stepsPerRevolution = 200;
+// Microstepping multiplier (1, 2, 4, 8, 16, or 32)
+int microstepSetting = 16;
+
+//Right Ascension HMS and Declination DMS Variables
+int RAhrs = 0;
+int RAmins = 0;
+int RAsec = 0;
+
+int DecDeg = 0;
+int DecMin = 0;
+int DecSec = 0;
+
+//Display Declination Coords
+int dispDecDeg = 0;
+int dispDecMin = 0;
+int dispDecSec = 0;
+
+AccelStepper stepper1(AccelStepper::DRIVER, STEP_PIN1, DIR_PIN1);
+AccelStepper stepper2(AccelStepper::DRIVER, STEP_PIN2, DIR_PIN2);
+
+//Loop variables
+// For periodic LCD refresh
+unsigned long lastMenuRefresh = 0;
+const unsigned long menuRefreshInterval = 100; // milliseconds
+
+// For button input tracking
+int lastButtonValue = 0;
+const unsigned long menuReentryDelay = 500;  // half a second
+unsigned long lastExitTime = 0;
+bool justExitedFunction = false;
+
+void setup() {
+  // put your setup code here, to run once:
+
+  Serial.begin(9600);
+  startTime = millis();
+
+  //Camera Pin Setup
+  pinMode(4, OUTPUT);
+
+
+  //Limit seitch setup
+  pinMode(LIMIT_SWITCH_PIN1, INPUT_PULLUP);
+  pinMode(LIMIT_SWITCH_PIN2, INPUT_PULLUP);
+
+  //Stepper motor setup
+  pinMode(MS1_PIN1, OUTPUT);
+  pinMode(MS2_PIN1, OUTPUT);
+
+  pinMode(MS1_PIN2, OUTPUT);
+  pinMode(MS2_PIN2, OUTPUT);
+
+  // Set microstepping mode (adjust as needed: HIGH or LOW)
+  digitalWrite(MS1_PIN1, HIGH);  // Set to LOW or HIGH for desired microstep setting
+  digitalWrite(MS2_PIN1, HIGH);  // Set to LOW or HIGH for desired microstep setting
+
+  digitalWrite(MS1_PIN2, HIGH);  // Set to LOW or HIGH for desired microstep setting
+  digitalWrite(MS2_PIN2, HIGH);  // Set to LOW or HIGH for desired microstep setting
+
+  // Set the desired RPM and the max RPM
+  float desiredRPM = 100; // Set the desired speed in rpm (revolutions per minute)
+  float MaxRPM = 300; // Set max speed in rpm (revolutions per minute)
+
+  // Calculate and set the desired and max speed in steps per second
+  float speedStepsPerSec = (microstepSetting * stepsPerRevolution*desiredRPM) / 60.0;
+  float Max_Speed_StepsPerSec = microstepSetting * stepsPerRevolution * MaxRPM / 60; // Specify max speed in steps/sec (converted from RPM)
+  stepper1.setMaxSpeed(Max_Speed_StepsPerSec);
+  stepper1.setSpeed(speedStepsPerSec);
+
+  stepper2.setMaxSpeed(Max_Speed_StepsPerSec);
+  stepper2.setSpeed(speedStepsPerSec);
+
+  //LCD Setup
+  analogWrite(19,contrast);
+  lcd.begin(16, 2);
+
+  lcd.setCursor(0, 0);
+  lcd.print("Navigator II");
+  lcd.setCursor(0, 1);
+  lcd.print("Equatorial Mount");
+  delay(3000);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Created by");
+  lcd.setCursor(0, 1);
+  lcd.print("Mukul Naidu");
+  delay(2000);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Created by");
+  lcd.setCursor(0, 1);
+  lcd.print("Mukul Naidu");
+  delay(2000);
+  lcd.clear();
+
+}
+
+int incrementDoubleDigit(int cursor_position){
+  int tensPlace = 0;
+  int onesPlace = 0;
+  int value;
+  
+  lcd.blink();
+
+  lcd.setCursor(cursor_position, 1);
+  lcd.print(tensPlace);
+  lcd.setCursor(cursor_position + 1, 1);
+  lcd.print(onesPlace);
+
+  //Increment or Decrement tens place
+  while (true){
+    value = analogRead(A0);
+
+    lcd.setCursor(13, 1);
+    lcd.print("   ");
+    Serial.println("Setting Tens Place");
+    if (value > 800 && value < 1000) {
+      if(tensPlace < 9){
+        Serial.println("Button1 Increment Up One");
+        tensPlace++;
+        Serial.println(tensPlace);
+        lcd.setCursor(cursor_position, 1);
+        lcd.print(tensPlace);
+      }
+    } else if (value > 750 && value < 800) {
+      if(tensPlace > 0){
+        Serial.println("Button2 Increment Down One");
+        tensPlace--;
+        Serial.println(tensPlace);
+        lcd.setCursor(cursor_position, 1);
+        lcd.print(tensPlace);
+      } 
+    } else if(value < 480){
+      Serial.println("Set");
+      lcd.setCursor(13, 1);
+      lcd.print("Set");
+      break;
+    }
+    delay(500);
+  }
+  
+  delay(500);
+
+  //Increment or Decrement ones place
+  while (true){
+    value = analogRead(A0);
+
+    lcd.setCursor(13, 1);
+    lcd.print("   ");
+
+    Serial.println("Setting Ones Place");
+    if (value > 800 && value < 1000) {
+      if(onesPlace < 9){
+        Serial.println("Button1 Increment Up One");
+        onesPlace++;
+        Serial.println(onesPlace);
+        lcd.setCursor(cursor_position + 1, 1);
+        lcd.print(onesPlace);
+      }
+    } else if (value > 750 && value < 800) {
+      if(onesPlace > 0){
+        Serial.println("Button2 Increment Down One");
+        onesPlace--;
+        Serial.println(onesPlace);
+        lcd.setCursor(cursor_position + 1, 1);
+        lcd.print(onesPlace);
+      } 
+    } else if(value < 480){
+      Serial.println("Set");
+      lcd.setCursor(13, 1);
+      lcd.print("Set");
+      break;
+    }
+    delay(500);
+  }
+
+  lcd.noBlink();
+  int coordinateValue = (tensPlace * 10) + onesPlace;
+  return coordinateValue;
+}
+
+void addOrSubtractToRA(int secToAdd, int &RAhrs, int &RAmins, int &RAsec){
+
+  long totalSeconds = secToAdd + (RAhrs * 3600) + (RAmins * 60) + (RAsec);
+
+  const long SECONDS_IN_DAY = 24L * 3600L;
+  while (totalSeconds < 0) totalSeconds += SECONDS_IN_DAY;
+  totalSeconds = totalSeconds % SECONDS_IN_DAY;
+
+  RAhrs = totalSeconds/3600;
+  RAmins = (totalSeconds%3600)/60;
+  RAsec = totalSeconds%60;
+}
+
+void addOrSubtractToDec(int secToAdd, int &RAhrs, int &RAmins, int &RAsec, int &DecDeg, int &DecMin, int &DecSec, int &dispDecDeg, int &dispDecMin, int &dispDecSec){
+    // Convert Dec to total arcseconds from 0° (not signed yet)
+    int givenTotalArcSec = DecDeg * 3600 + DecMin * 60 + DecSec;
+
+    // New total Dec after adding/subtracting arcseconds
+    int newTotalArcSec = givenTotalArcSec + secToAdd;
+
+    // Normalize to [0, 360°), still in arcseconds
+    int normBefore = (givenTotalArcSec % 1296000 + 1296000) % 1296000;
+    int normAfter  = (newTotalArcSec % 1296000 + 1296000) % 1296000;
+    int beforeQuadrant = 0;
+    int afterQuadrant = 0;
+
+    if (normBefore >= 0 && normBefore < 324000){
+      beforeQuadrant = 2;
+    } else if (normBefore >= 324000 && normBefore < 648000){
+      beforeQuadrant = 4;
+    } else if (normBefore >= 648000 && normBefore < 972000){
+      beforeQuadrant = 3;
+    } else {
+      beforeQuadrant = 1;
+    }
+
+    if (normAfter >= 0 && normAfter < 324000){
+      afterQuadrant = 2;
+    } else if (normAfter >= 324000 && normAfter < 648000){
+      afterQuadrant = 4;
+    } else if (normAfter >= 648000 && normAfter < 972000){
+      afterQuadrant = 3;
+    } else {
+      afterQuadrant = 1;
+    }
+
+    bool crossedPole;
+    bool crossedEquator;
+
+    if ((beforeQuadrant == 2 || beforeQuadrant == 4) && (afterQuadrant == 1 || afterQuadrant == 3)){
+      crossedEquator = true;
+    } else if ((beforeQuadrant == 1 || beforeQuadrant == 3) && (afterQuadrant == 2 || afterQuadrant == 4)){
+      crossedEquator = true;
+    } else {
+      crossedEquator = false;
+    }
+    
+    if ((beforeQuadrant == 2 || beforeQuadrant == 1) && (afterQuadrant == 4 || afterQuadrant == 3)) {
+      crossedPole = true;
+    } else if ((beforeQuadrant == 4 || beforeQuadrant == 3) && (afterQuadrant == 2 || afterQuadrant == 1)) {
+      crossedPole = true;
+    } else {
+      crossedPole = false;
+    }
+
+    if (crossedPole) {
+        addOrSubtractToRA(43200, RAhrs, RAmins, RAsec);
+    }
+
+    int decSign = 1;
+    int adjustedArcSec = 0;
+
+    if (afterQuadrant == 2){
+      adjustedArcSec = normAfter;
+      decSign = 1;
+    } else if (afterQuadrant == 4){
+      adjustedArcSec = 324000 - (normAfter - 324000);
+      decSign = 1;
+    } else if (afterQuadrant == 3){
+      adjustedArcSec = (normAfter - 648000);
+      decSign = -1;
+    } else if (afterQuadrant == 1){
+      adjustedArcSec = 324000 - (normAfter - 972000);
+      decSign = -1;
+    }
+
+    dispDecDeg = adjustedArcSec / 3600;
+    dispDecMin = (adjustedArcSec % 3600) / 60;
+    dispDecSec = adjustedArcSec % 60;
+    dispDecDeg *= decSign;
+
+    // Update DecDeg, DecMin, DecSec as raw 0-360° representation (if needed)
+    DecDeg = normAfter / 3600;
+    DecMin = (normAfter % 3600) / 60;
+    DecSec = normAfter % 60;
+}
+
+void setZeroFunction(){
+
+  unsigned long startTime = millis();
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Setting Zero Dec");
+  
+  while (digitalRead(LIMIT_SWITCH_PIN1) == HIGH){
+    unsigned long currentTime = millis();
+    stepper1.setSpeed(6400);
+    stepper1.runSpeed();
+    if (currentTime - startTime >= 100){
+      if (digitalRead(LIMIT_SWITCH_PIN1) == LOW){
+        Serial.println("Dec Axis Zeroed");
+        break;
+      }
+    }
+  }
+
+  lcd.setCursor(0, 0);
+  lcd.print("Dec Axis Zeroed ");
+
+  delay(2000);
+
+  DecDeg = 90;
+  DecMin = 0;
+  DecSec = 0;
+
+  dispDecDeg = 90;
+  dispDecMin = 0;
+  dispDecSec = 0;
+
+  addOrSubtractToDec(10655, RAhrs, RAmins, RAsec, DecDeg, DecMin, DecSec, dispDecDeg, dispDecMin, dispDecSec);
+
+  startTime = millis();
+
+  lcd.setCursor(0, 0);
+  lcd.print("Setting Zero RA");
+
+  while (digitalRead(LIMIT_SWITCH_PIN2) == HIGH){
+    unsigned long currentTime = millis();
+    stepper2.setSpeed(6400);
+    stepper2.runSpeed();
+    if (currentTime - startTime >= 100){
+      if (digitalRead(LIMIT_SWITCH_PIN2) == LOW){
+        Serial.println("RA Axis Zeroed");
+        break;
+      }
+    }
+  }
+
+  lcd.setCursor(0, 0);
+  lcd.print("RA Axis Zeroed  ");
+
+  delay(2000);
+
+  lcd.setCursor(0, 0);
+  lcd.print("Enter RA Above  "); 
+  lcd.setCursor(0, 1);
+  lcd.print("00h 00m 00s"); 
+
+  RAhrs = incrementDoubleDigit(0);
+  delay(1000);
+  RAmins = incrementDoubleDigit(4);
+  delay(1000);
+  RAsec = incrementDoubleDigit(8);
+
+  lcd.setCursor(0, 0);
+  lcd.print("RA Set          ");
+
+  delay(2000);
+
+  addOrSubtractToRA(21600, RAhrs, RAmins, RAsec);
+  addOrSubtractToRA(6674, RAhrs, RAmins, RAsec);
+
+  lcd.setCursor(0, 0);
+  lcd.print(RAhrs);
+  lcd.print("hrs");  // Degree symbol
+  lcd.print(" ");
+  lcd.print(RAmins);
+  lcd.print("'");
+  lcd.print(" ");
+  lcd.print(RAsec);
+  lcd.print("''      ");
+
+  lcd.setCursor(0, 1);
+  lcd.print(dispDecDeg);
+  lcd.print((char)223);  // Degree symbol
+  lcd.print(" ");
+  lcd.print(dispDecMin);
+  lcd.print("'");
+  lcd.print(" ");
+  lcd.print(dispDecSec);
+  lcd.print("''      ");
+}
+
+
+void CameraCalibrationFrames(){
+  int numberOfShots = 0;
+  int exposureSeconds = 0;
+  int value;
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Replace Lens Cap");
+  lcd.setCursor(0, 1);
+  lcd.print("To Shoot Darks");
+
+  delay(3000);
+
+  lcd.setCursor(0, 0);
+  lcd.print("# of Shots:     ");
+  lcd.setCursor(0,1);
+  lcd.print("Exposure:        ");
+
+  lcd.setCursor(13, 0);
+  lcd.print("___");
+
+  while (true){
+    value = analogRead(A0);
+
+    Serial.println("Setting Tens Place");
+    if (value > 800 && value < 1000) {
+      if(numberOfShots < 50){
+        Serial.println("Button1 Increment Up Five");
+        numberOfShots += 5;
+        Serial.println(numberOfShots);
+        lcd.setCursor(13,0);
+        lcd.print("___");
+        lcd.setCursor(13,0);
+        lcd.print(numberOfShots);
+      }
+    } else if (value > 750 && value < 800) {
+      if(numberOfShots > 0){
+        Serial.println("Button2 Increment Down Five");
+        numberOfShots -= 5;
+        Serial.println(numberOfShots);
+        lcd.setCursor(13,0);
+        lcd.print("___");
+        lcd.setCursor(13,0);
+        lcd.print(numberOfShots);
+      } 
+    } else if(value < 480){
+      Serial.println("Set");
+      lcd.setCursor(13, 0);
+      lcd.print("Set");
+      delay(1000);
+      lcd.setCursor(13, 0);
+      lcd.print("   ");
+      lcd.setCursor(13, 0);
+      lcd.print(numberOfShots);
+      break;
+    }
+    delay(500);
+  }
+  
+  delay(500);
+
+  lcd.setCursor(13, 1);
+  lcd.print("___");
+
+  while (true){
+    value = analogRead(A0);
+
+    Serial.println("Setting Ones Place");
+    if (value > 800 && value < 1000) {
+      if(exposureSeconds < 960){
+        Serial.println("Button1 Increment Up One");
+        exposureSeconds += 15;
+        Serial.println(exposureSeconds);
+        lcd.setCursor(13,1);
+        lcd.print("___");
+        lcd.setCursor(13,1);
+        lcd.print(exposureSeconds);
+      }
+    } else if (value > 750 && value < 800) {
+      if(exposureSeconds > 0){
+        Serial.println("Button2 Increment Down One");
+        exposureSeconds -= 15;
+        Serial.println(exposureSeconds);
+        lcd.setCursor(13,1);
+        lcd.print("___");
+        lcd.setCursor(13,1);
+        lcd.print(exposureSeconds);
+      } 
+    } else if(value < 480){
+      Serial.println("Set");
+      lcd.setCursor(13, 1);
+      lcd.print("Set");
+      delay(1000);
+      lcd.setCursor(13, 1);
+      lcd.print("   ");
+      lcd.setCursor(13, 1);
+      lcd.print(exposureSeconds);
+      break;
+    }
+    delay(500);
+  }
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(numberOfShots); 
+  lcd.print(" Shots");
+  lcd.setCursor(0, 1);
+  lcd.print("At ");
+  lcd.print(exposureSeconds);
+  lcd.print(" secs each");
+
+  int i;
+
+  for(i = 0; i <= numberOfShots; i++){
+      digitalWrite(CAMERA_PIN, HIGH);
+      delay(exposureSeconds*1000);
+      digitalWrite(CAMERA_PIN, LOW);
+      delay(1000);
+  }
+}
+
+void jogFunction() {
+  lcd.clear();
+  while(true) {
+    int value = analogRead(A0);
+    unsigned long currentTime = millis();
+
+    // Check for button press and set jog direction
+    if (value > 800 && value < 1000) { // Button1 Jog RA right
+      jogDirectionRA = 1;
+      isJogging = true;
+    } else if (value > 750 && value < 800) { // Button2 Jog RA left
+      jogDirectionRA = -1;
+      isJogging = true;
+    } else {
+      jogDirectionRA = 0;
+    }
+
+    if (value > 650 && value < 750) { // Button3 Jog Dec right
+      jogDirectionDec = 1;
+      isJogging = true;
+    } else if (value > 480 && value < 650) { // Button4 Jog Dec left
+      jogDirectionDec = -1;
+      isJogging = true;
+    } else {
+      jogDirectionDec = 0;
+    }
+
+    // If button 5 (exit) is pressed
+    if (value < 480) {
+      isJogging = false;
+      jogDirectionRA = 0;
+      jogDirectionDec = 0;
+      break;
+    }
+
+    // Move steppers
+    stepper2.setSpeed(jogDirectionRA * 6400);  // RA
+    stepper2.runSpeed();
+
+    stepper1.setSpeed(jogDirectionDec * 6400); // Dec
+    stepper1.runSpeed();
+
+    // Only update coordinates and LCD every 100ms
+    if (isJogging && currentTime - lastJogUpdate >= 1000) {
+      lastJogUpdate = currentTime;
+
+      if (jogDirectionRA != 0) {
+        int deltaRA = jogDirectionRA * 141 + jogDirectionRA;  // Update this based on jog speed
+        addOrSubtractToRA(deltaRA, RAhrs, RAmins, RAsec);
+        lcd.setCursor(0, 0);
+        lcd.print(RAhrs); lcd.print("hrs ");
+        lcd.print(RAmins); lcd.print("' ");
+        lcd.print(RAsec); lcd.print("''    ");
+      }
+
+      if (jogDirectionDec != 0) {
+        int deltaDec = jogDirectionDec * 2116 + (jogDirectionDec * 15);  // Update this based on jog speed
+        addOrSubtractToDec(deltaDec, RAhrs, RAmins, RAsec, DecDeg, DecMin, DecSec, dispDecDeg, dispDecMin, dispDecSec);
+        lcd.setCursor(0, 1);
+        lcd.print(dispDecDeg); lcd.print((char)223); lcd.print(" ");
+        lcd.print(dispDecMin); lcd.print("' ");
+        lcd.print(dispDecSec); lcd.print("''    ");
+        lcd.setCursor(0, 0);
+        lcd.print(RAhrs); lcd.print("hrs ");
+        lcd.print(RAmins); lcd.print("' ");
+        lcd.print(RAsec); lcd.print("''    ");
+      }
+    }
+  }
+}
+
+void trackingFunction(int numberOfLightShots, int lightExposureSeconds) {
+  unsigned long lastShotTime = 0;
+  int shotCount = 0;
+  int value = 0;
+  bool exposing = false;
+
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Tracking");
+  lcd.setCursor(0,1);
+  lcd.print(dispDecDeg); lcd.print((char)223); 
+  lcd.print(" ");
+  lcd.print(RAhrs); 
+  lcd.print(":");
+  lcd.print(RAmins);
+  Serial.print(numberOfLightShots, lightExposureSeconds);
+
+  while (true) {
+    value = analogRead(A0);
+    unsigned long currentTime = millis();
+
+    stepper2.setSpeed(-45.370370); 
+    stepper2.runSpeed();
+
+
+    // Start new exposure
+    if (!exposing && (currentTime - lastShotTime >= 1000) && shotCount < numberOfLightShots) {
+      digitalWrite(CAMERA_PIN, HIGH);
+      lastShotTime = currentTime;
+      exposing = true;
+      Serial.print("Starting shot "); Serial.println(shotCount + 1);
+      lcd.setCursor(12,0);
+      lcd.print(shotCount);
+    }
+
+    // Finish current exposure
+    if (exposing && (currentTime - lastShotTime >= lightExposureSeconds * 1000)) {
+      digitalWrite(CAMERA_PIN, LOW);
+      exposing = false;
+      shotCount++;
+      lastShotTime = currentTime;
+      Serial.print("Finished shot "); Serial.println(shotCount);
+      lcd.setCursor(12,0);
+      lcd.print(shotCount);
+    }
+
+    // All shots complete
+    if (shotCount >= numberOfLightShots) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Done Shooting");
+      lcd.setCursor(0, 1);
+      lcd.print("Tracking Stopped");
+      stepper2.setSpeed(0);
+      break;  // exit loop after all shots are taken
+    }
+
+    // Stop if button is pressed
+    if (value < 480) {
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Tracking Stopped");
+      digitalWrite(CAMERA_PIN, LOW);
+      delay(2000);
+      break;
+    }
+  }
+}
+
+void SetCamera(int &numberOfLightShots, int &lightExposureSeconds){
+  int value;
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("# of Shots:     ");
+  lcd.setCursor(0,1);
+  lcd.print("Exposure:        ");
+
+  lcd.setCursor(13, 0);
+  lcd.print("___");
+
+  while (true){
+    value = analogRead(A0);
+
+    if (value > 800 && value < 1000) {
+      if(numberOfLightShots < 100){
+        Serial.println("Button1 Increment Up Five");
+        numberOfLightShots += 5;
+        Serial.println(numberOfLightShots);
+        lcd.setCursor(13,0);
+        lcd.print("___");
+        lcd.setCursor(13,0);
+        lcd.print(numberOfLightShots);
+      }
+    } else if (value > 750 && value < 800) {
+      if(numberOfLightShots > 0){
+        Serial.println("Button2 Increment Down Five");
+        numberOfLightShots -= 5;
+        Serial.println(numberOfLightShots);
+        lcd.setCursor(13,0);
+        lcd.print("___");
+        lcd.setCursor(13,0);
+        lcd.print(numberOfLightShots);
+      } 
+    } else if(value < 480){
+      Serial.println("Set");
+      lcd.setCursor(13, 0);
+      lcd.print("Set");
+      delay(1000);
+      lcd.setCursor(13, 0);
+      lcd.print("   ");
+      lcd.setCursor(13, 0);
+      lcd.print(numberOfLightShots);
+      break;
+    }
+    delay(500);
+  }
+  
+  delay(500);
+
+  lcd.setCursor(13, 1);
+  lcd.print("___");
+
+  while (true){
+    value = analogRead(A0);
+
+    Serial.println("Setting Ones Place");
+    if (value > 800 && value < 1000) {
+      if(lightExposureSeconds < 960){
+        lightExposureSeconds += 15;
+        Serial.println(lightExposureSeconds);
+        lcd.setCursor(13,1);
+        lcd.print("___");
+        lcd.setCursor(13,1);
+        lcd.print(lightExposureSeconds);
+      }
+    } else if (value > 750 && value < 800) {
+      if(lightExposureSeconds > 0){
+        lightExposureSeconds -= 15;
+        Serial.println(lightExposureSeconds);
+        lcd.setCursor(13,1);
+        lcd.print("___");
+        lcd.setCursor(13,1);
+        lcd.print(lightExposureSeconds);
+      } 
+    } else if(value < 480){
+      Serial.println("Set");
+      lcd.setCursor(13, 1);
+      lcd.print("Set");
+      delay(1000);
+      lcd.setCursor(13, 1);
+      lcd.print("   ");
+      lcd.setCursor(13, 1);
+      lcd.print(lightExposureSeconds);
+      break;
+    }
+    delay(500);
+  }
+
+}
+
+void loop() {
+  unsigned long currentTime = millis();
+
+  // Refresh the LCD only every 100ms
+  if (currentTime - lastMenuRefresh >= menuRefreshInterval) {
+    lastMenuRefresh = currentTime;
+    lcd.setCursor(0, 0);
+    lcd.print("Zero  Jog  Track");
+    lcd.setCursor(0, 1);
+    lcd.print("  Darks Camera  ");
+  }
+
+  // Background RA tracking
+  stepper2.setSpeed(-45.370370); 
+  stepper2.runSpeed();
+
+  // If we just exited a function, block button reads for a cooldown
+  if (justExitedFunction && (currentTime - lastExitTime < menuReentryDelay)) {
+    return;
+  } else {
+    justExitedFunction = false;
+  }
+
+  // Read button
+  int value = analogRead(A0);
+
+  if (abs(value - lastButtonValue) > 20) {
+    lastButtonValue = value;
+
+    if (value > 800 && value < 1000) {
+      trackingFunction(numberOfLightShots, lightExposureSeconds);
+      lastExitTime = millis();
+      justExitedFunction = true;
+    } else if (value > 750 && value < 800) {
+      SetCamera(numberOfLightShots, lightExposureSeconds);
+      lastExitTime = millis();
+      justExitedFunction = true;
+    } else if (value > 650 && value < 750) {
+      jogFunction();
+      lastExitTime = millis();
+      justExitedFunction = true;
+    } else if (value > 480 && value < 650) {
+      CameraCalibrationFrames();
+      lastExitTime = millis();
+      justExitedFunction = true;
+    } else if (value < 480) {
+      setZeroFunction();
+      lastExitTime = millis();
+      justExitedFunction = true;
+    }
+  }
+}
