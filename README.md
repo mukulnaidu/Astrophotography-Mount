@@ -53,7 +53,7 @@ The program uses **non-blocking timing** (`millis()`) for menu refreshes and mov
    - **Jog:** Manually align telescope.  
    - **Camera:** Set number of exposures and duration.  
    - **Track:** Begin automated tracking and imaging.
-   - - **Darks:** Set number of dark exposures and duration. 
+   - **Darks:** Set number of dark exposures and duration. 
 3. Exit any mode by pressing the analog "exit" button.
 
 ---
