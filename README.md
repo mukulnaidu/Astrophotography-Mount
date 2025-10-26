@@ -1,4 +1,4 @@
-# Navigator II — Dual-Axis Equatorial Mount Controller
+Harmonic Gearbox Equatorial Astrophotography Mount Controller
 
 An Arduino-based precision controller for an astrophotography equatorial mount, designed to automate sidereal tracking, camera exposure sequences
 
